@@ -1,50 +1,96 @@
-"""Deterministic, auditable CSV checks; no LLM calculations."""
+"""Data-quality and statistics helpers for DataTrap.
+These functions flag questions for investigation. They do not decide
+whether an outlier is an error, and they do not establish causation.
+"""
 from __future__ import annotations
-import math
+from typing import Any
 import pandas as pd
-
-
-def missing_counts(df: pd.DataFrame) -> dict[str, int]:
-    return {str(k): int(v) for k, v in df.isna().sum().items()}
-
-
-def iqr_outliers(df: pd.DataFrame) -> dict[str, dict]:
-    result = {}
-    for col in df.select_dtypes(include='number').columns:
-        values = df[col].dropna()
-        if len(values) < 4:
+def validate_dataframe(df: pd.DataFrame) -> None:
+    if not isinstance(df, pd.DataFrame):
+        raise TypeError("Expected a pandas DataFrame.")
+    if df.empty:
+        raise ValueError("The dataset has no rows.")
+    if df.shape[1] == 0:
+        raise ValueError("The dataset has no columns.")
+def numeric_columns(df: pd.DataFrame) -> list[str]:
+    return df.select_dtypes(include="number").columns.tolist()
+def missing_value_summary(df: pd.DataFrame) -> pd.DataFrame:
+    """Count missing values per column."""
+    validate_dataframe(df)
+    n_rows = len(df)
+    counts = df.isna().sum()
+    summary = pd.DataFrame(
+        {
+            "column": counts.index,
+            "missing_count": counts.to_numpy(),
+            "missing_pct": (counts / n_rows * 100).round(2).to_numpy(),
+        }
+    )
+    return summary.sort_values(
+        ["missing_count", "column"], ascending=[False, True]
+    ).reset_index(drop=True)
+def iqr_outlier_report(df: pd.DataFrame, factor: float = 1.5) -> pd.DataFrame:
+    """Flag potential outliers with the interquartile-range method.
+    A value is flagged when it is below Q1 - factor*IQR or above Q3 + factor*IQR.
+    The report includes the thresholds so users can see how the flag was computed.
+    """
+    validate_dataframe(df)
+    rows: list[dict[str, Any]] = []
+    for column in numeric_columns(df):
+        series = df[column].dropna()
+        if series.empty:
             continue
-        q1, q3 = values.quantile([0.25, 0.75])
-        iqr = float(q3 - q1)
-        if not math.isfinite(iqr) or iqr == 0:
-            continue
-        lower, upper = float(q1 - 1.5 * iqr), float(q3 + 1.5 * iqr)
-        count = int(((values < lower) | (values > upper)).sum())
-        result[str(col)] = {'count': count, 'lower': round(lower, 4), 'upper': round(upper, 4)}
-    return result
-
-
-def correlation_sensitivity(df: pd.DataFrame, x: str, y: str) -> dict:
-    if x == y or x not in df or y not in df:
-        raise ValueError('Choose two different existing columns')
-    pair = df[[x, y]].dropna().copy()
-    if len(pair) < 3:
-        return {'n': len(pair), 'correlation': None, 'filtered_n': None, 'filtered_correlation': None, 'removed': 0}
-    corr = pair[x].corr(pair[y])
-    mask = pd.Series(True, index=pair.index)
-    for col in (x, y):
-        q1, q3 = pair[col].quantile([0.25, 0.75])
+        q1 = float(series.quantile(0.25))
+        q3 = float(series.quantile(0.75))
         iqr = q3 - q1
-        if pd.notna(iqr) and iqr > 0:
-            mask &= pair[col].between(q1 - 1.5 * iqr, q3 + 1.5 * iqr)
-    filtered = pair[mask]
-    corr2 = filtered[x].corr(filtered[y]) if len(filtered) >= 3 else float('nan')
-    def safe(value):
-        return round(float(value), 4) if pd.notna(value) and math.isfinite(float(value)) else None
-    return {'n': len(pair), 'correlation': safe(corr), 'filtered_n': len(filtered),
-            'filtered_correlation': safe(corr2), 'removed': len(pair) - len(filtered)}
-
-
-def scan(df: pd.DataFrame) -> dict:
-    return {'rows': len(df), 'columns': len(df.columns),
-            'missing': missing_counts(df), 'iqr_outliers': iqr_outliers(df)}
+        lower = q1 - factor * iqr
+        upper = q3 + factor * iqr
+        if iqr == 0:
+            mask = series != series.median()
+        else:
+            mask = (series < lower) | (series > upper)
+        flagged = series[mask]
+        rows.append(
+            {
+                "column": column,
+                "q1": round(q1, 4),
+                "q3": round(q3, 4),
+                "iqr": round(iqr, 4),
+                "lower_threshold": round(lower, 4),
+                "upper_threshold": round(upper, 4),
+                "outlier_count": int(mask.sum()),
+                "outlier_values": flagged.tolist(),
+            }
+        )
+    return pd.DataFrame(rows)
+def row_has_iqr_outlier(df: pd.DataFrame, factor: float = 1.5) -> pd.Series:
+    """Return a boolean mask of rows that contain at least one IQR outlier."""
+    validate_dataframe(df)
+    mask = pd.Series(False, index=df.index)
+    report = iqr_outlier_report(df, factor=factor)
+    for _, row in report.iterrows():
+        column = row["column"]
+        lower = row["lower_threshold"]
+        upper = row["upper_threshold"]
+        series = df[column]
+        column_mask = series.notna() & ((series < lower) | (series > upper))
+        if row["iqr"] == 0:
+            median = df[column].median()
+            column_mask = series.notna() & (series != median)
+        mask = mask | column_mask
+    return mask
+def drop_flagged_outlier_rows(df: pd.DataFrame, factor: float = 1.5) -> pd.DataFrame:
+    """Sensitivity check: rows without IQR-flagged values.
+    This is an exploration aid, not a recommendation to drop those rows.
+    """
+    mask = row_has_iqr_outlier(df, factor=factor)
+    return df.loc[~mask].copy()
+def numeric_correlations(
+    df: pd.DataFrame, min_periods: int = 3
+) -> pd.DataFrame | None:
+    """Pearson correlations among numeric columns with enough overlapping values."""
+    validate_dataframe(df)
+    numeric = df[numeric_columns(df)]
+    if numeric.shape[1] < 2:
+        return None
+    return numeric.corr(min_periods=min_periods)
