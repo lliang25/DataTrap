@@ -1,129 +1,148 @@
-"""DataTrap Streamlit UI — upload a CSV, preview it, and inspect data-quality flags."""
-from __future__ import annotations
+"""CSV quality exploration with optional local AI explanations."""
+import hashlib
+import json
+from pathlib import Path
+
+import numpy as np
 import pandas as pd
 import streamlit as st
+
+from agent import analyze, explain_report, run_agent
 from ai_explainer import summarize_findings
-from analyzer import (
-    drop_flagged_outlier_rows,
-    iqr_outlier_report,
-    missing_value_summary,
-    numeric_columns,
-    numeric_correlations,
-    row_has_iqr_outlier,
-)
+from analyzer import (missing_value_summary, iqr_outlier_report, numeric_columns,
+                      numeric_correlations, row_has_iqr_outlier, validate_dataframe)
+
 st.set_page_config(page_title="DataTrap", layout="wide")
 st.title("DataTrap")
 st.caption("Question the data, not just the answers.")
-st.info(
-    "A CSV can hide missing values and extreme observations behind a clean chart. "
-    "DataTrap flags those issues for investigation. It does not prove selection bias, "
-    "causation, or that an outlier is a mistake."
-)
+st.info("Flags invite investigation. They do not prove errors, selection bias, or causation.")
 uploaded = st.file_uploader("Upload a CSV dataset", type=["csv"])
 use_sample = st.checkbox("Or load the bundled sample dataset", value=uploaded is None)
-df: pd.DataFrame | None = None
-source_label = ""
-if uploaded is not None:
-    df = pd.read_csv(uploaded)
-    source_label = uploaded.name
-elif use_sample:
-    df = pd.read_csv("sample_data/student_scores.csv")
-    source_label = "sample_data/student_scores.csv"
-if df is None:
+if uploaded is None and not use_sample:
     st.stop()
-st.subheader("Preview")
-st.write(f"**Source:** {source_label} · **{len(df)} rows × {df.shape[1]} columns**")
-st.dataframe(df.head(25), use_container_width=True)
 try:
-    missing = missing_value_summary(df)
-    outliers = iqr_outlier_report(df)
-    corr = numeric_correlations(df)
-    outlier_rows = row_has_iqr_outlier(df)
-    sensitivity_df = drop_flagged_outlier_rows(df)
-except (TypeError, ValueError) as exc:
-    st.error(str(exc))
+    source = uploaded if uploaded is not None else Path(__file__).parent / "sample_data" / "demo.csv"
+    df = pd.read_csv(source)
+    validate_dataframe(df)
+except (OSError, UnicodeError, ValueError, pd.errors.ParserError) as exc:
+    st.error(f"Could not read CSV: {exc}")
     st.stop()
+
+st.subheader("Preview")
+st.write(f"{len(df)} rows × {df.shape[1]} columns")
+st.dataframe(df.head(25), use_container_width=True)
+missing = missing_value_summary(df)
+outliers = iqr_outlier_report(df)
+corr = numeric_correlations(df)
+flags = row_has_iqr_outlier(df)
 st.subheader("Missing values")
 st.dataframe(missing, use_container_width=True)
-if missing["missing_count"].sum() == 0:
-    st.success("No missing values counted.")
-else:
-    st.warning(
-        "Missing values can quietly change totals, averages, and correlations. "
-        "Ask how those gaps were produced before drawing a conclusion."
-    )
 st.subheader("IQR outlier flags")
-st.write(
-    "A value is flagged when it falls below **Q1 − 1.5×IQR** or above **Q3 + 1.5×IQR**. "
-    "Thresholds are shown so you can see the evidence, not just the warning."
-)
+st.caption("Fences: Q1 − 1.5 × IQR and Q3 + 1.5 × IQR. Calculations use full precision. Flags are not a recommendation to delete rows.")
 if outliers.empty:
-    st.info("No numeric columns were available for an IQR scan.")
+    st.info("No finite numeric observations available for IQR analysis.")
 else:
-    display_outliers = outliers.drop(columns=["outlier_values"])
-    st.dataframe(display_outliers, use_container_width=True)
-    flagged = outliers[outliers["outlier_count"] > 0]
-    if flagged.empty:
-        st.success("No IQR-flagged values in the numeric columns.")
-    else:
-        st.warning(
-            f"{int(outlier_rows.sum())} row(s) contain at least one IQR-flagged value. "
-            "Use the comparison below as a sensitivity check — not a recommendation to delete data."
-        )
-        with st.expander("Flagged values by column"):
-            for _, row in flagged.iterrows():
-                st.write(f"**{row['column']}:** {row['outlier_values']}")
+    st.dataframe(outliers.drop(columns="outlier_values"), use_container_width=True)
+    st.write(f"{int(flags.sum())} rows have at least one flag across all numeric columns.")
+    with st.expander("Flagged values (displayed locally; excluded from AI report)"):
+        st.dataframe(outliers[["column", "outlier_values"]], use_container_width=True)
+
 st.subheader("Correlation exploration")
-st.caption("Correlation ≠ causation. A strong number can still be an artifact of missing data or a few extreme rows.")
 if corr is None:
     st.info("Need at least two numeric columns to compute correlations.")
 else:
-    st.dataframe(corr.round(3), use_container_width=True)
-st.subheader("Chart and outlier sensitivity")
+    st.dataframe(corr, use_container_width=True)
+    finite = df[numeric_columns(df)].replace([np.inf, -np.inf], np.nan).notna().astype(int)
+    st.caption("Pairwise complete finite observation counts. Correlations require n ≥ 3; constant columns have undefined correlation.")
+    st.dataframe(finite.T.dot(finite), use_container_width=True)
+
 numeric = numeric_columns(df)
-if not numeric:
-    st.info("Add a numeric column to plot a chart.")
-else:
-    left, right = st.columns(2)
-    with left:
-        y_col = st.selectbox("Numeric column to plot", numeric)
-    with right:
-        x_candidates = [c for c in df.columns if c != y_col]
-        x_col = st.selectbox("Column on the x-axis", x_candidates, index=0)
-    view = st.radio(
-        "Which rows should the chart use?",
-        ["All uploaded rows", "Rows without IQR-flagged values"],
-        horizontal=True,
-    )
-    chart_df = df if view == "All uploaded rows" else sensitivity_df
-    if chart_df.empty:
-        st.warning("No rows remain after removing IQR-flagged observations.")
-    else:
-        plot_df = chart_df[[x_col, y_col]].dropna()
-        st.write(f"Plotting **{len(plot_df)}** rows ({view.lower()}).")
-        st.bar_chart(plot_df, x=x_col, y=y_col)
-    compare_left, compare_right = st.columns(2)
-    with compare_left:
-        st.metric("Rows in full dataset", len(df))
-        if y_col in df.columns:
-            st.metric(f"Mean {y_col} (all rows)", f"{pd.to_numeric(df[y_col], errors='coerce').mean():.2f}")
-    with compare_right:
-        st.metric("Rows without IQR flags", len(sensitivity_df))
-        if y_col in sensitivity_df.columns and not sensitivity_df.empty:
-            st.metric(
-                f"Mean {y_col} (without flags)",
-                f"{pd.to_numeric(sensitivity_df[y_col], errors='coerce').mean():.2f}",
-            )
-st.subheader("Plain-English recap")
-st.write(
-    summarize_findings(
-        missing=missing,
-        outliers=outliers,
-        correlations=corr,
-        n_rows=len(df),
-        n_outlier_rows=int(outlier_rows.sum()),
-    )
-)
-st.caption(
-    "This recap only restates calculated results. It is not independently verified statistical evidence."
-)
+x = y = None
+if len(numeric) >= 2:
+    st.subheader("Chart and outlier sensitivity")
+    x = st.selectbox("X numeric column", numeric)
+    y = st.selectbox("Y numeric column", [c for c in numeric if c != x])
+report = analyze(df, x, y)
+if report["nonfinite_count"]:
+    st.warning(f'{report["nonfinite_count"]} infinite values excluded from numeric calculations and plots; these are separate from missing values.')
+if x is not None and y is not None:
+    result = report["correlation_sensitivity"]
+    st.caption("Filtering uses only the selected X and Y columns. Fences use each column's finite observations; correlation and plots use complete pairs. Other columns cannot remove rows from this comparison.")
+    pair = df[[x, y]]
+    pair_flags = row_has_iqr_outlier(pair)
+    st.write(f'{result["flagged_rows"]} rows flagged in the selected columns.')
+    for panel, title, frame, stats in zip(st.columns(2), ["All rows", "Without selected-column flags"],
+                                          [pair, pair.loc[~pair_flags]], [result["before"], result["after"]]):
+        with panel:
+            st.write(title)
+            st.metric("Complete pairs (n)", stats["n"])
+            st.metric("Pearson r", "Unavailable" if stats["pearson_r"] is None else f'{stats["pearson_r"]:.4f}')
+            if stats["unavailable_reason"]:
+                st.info(stats["unavailable_reason"])
+            plot = frame.replace([np.inf, -np.inf], np.nan).dropna()
+            if not plot.empty:
+                st.scatter_chart(plot, x=x, y=y)
+    if result["delta_r"] is not None:
+        st.write(f'Change in r (filtered − original): {result["delta_r"]:+.4f}')
+elif numeric:
+    st.subheader("Single numeric column")
+    st.line_chart(df[numeric].replace([np.inf, -np.inf], np.nan))
+    st.caption("X-axis is row index. Add another numeric column for correlation sensitivity.")
+
+st.subheader("Rule-based recap")
+st.write(summarize_findings(missing, outliers, corr, len(df), int(flags.sum())))
+with st.expander("Auditable AI input (aggregate statistics and column names)"):
+    st.json(report)
+st.subheader("Optional local AI explanation")
+st.caption("Uses the configured Ollama endpoint. Only the aggregate report above is sent, including column names. Keep OLLAMA_HOST local for local processing. AI text may contain mistakes; compare it with the evidence.")
+# Key explanations to their exact evidence so reruns cannot display stale results.
+report_key = json.dumps(report, sort_keys=True, allow_nan=False)
+if st.button("Explain with local AI"):
+    st.session_state.pop("ai_explanation", None)
+    try:
+        with st.spinner("Waiting for Ollama (up to 60 seconds)…"):
+            explanation = explain_report(report)
+        st.session_state["ai_explanation"] = (report_key, explanation)
+    except Exception as exc:
+        st.error(f"Local AI unavailable: {exc}. Start Ollama and run `ollama pull llama3.2:1b`. The numeric report remains available.")
+if "ai_explanation" in st.session_state:
+    key, explanation = st.session_state["ai_explanation"]
+    if key == report_key:
+        st.warning("AI-generated interpretation is unverified. Small models can misstate counts or reverse comparisons; use the computed tables as the source of truth.")
+        st.write(explanation)
+
+st.subheader("Ask DataTrap")
+st.caption("Ask a question about this CSV. The local model chooses from four read-only analysis tools, with at most 5 decisions. Uses DATATRAP_AGENT_MODEL (default qwen3:1.7b). Your question, column names and aggregate tool results are sent to the configured Ollama endpoint.")
+# Fingerprint the actual dataset, not just its aggregate report.
+dataset_key = hashlib.sha256(pd.util.hash_pandas_object(df, index=True).values.tobytes()
+                             + str(list(zip(df.columns, df.dtypes.astype(str)))).encode()).hexdigest()
+with st.form("ask_datatrap"):
+    question = st.text_input("Ask DataTrap", placeholder="Do outliers affect the relationship between hours_studied and exam_score?", max_chars=2000)
+    ask = st.form_submit_button("Run Agent")
+if ask:
+    st.session_state.pop("agent_result", None)
+    try:
+        with st.spinner("Agent is choosing and running tools (maximum 5 decisions)…"):
+            agent_result = run_agent(df, question)
+        st.session_state["agent_result"] = (dataset_key, question, agent_result)
+    except Exception as exc:
+        st.error(f"Could not start agent: {exc}")
+if "agent_result" in st.session_state:
+    saved_key, saved_question, agent_result = st.session_state["agent_result"]
+    if saved_key == dataset_key:
+        st.write(f"Question: {saved_question}")
+        st.caption(f"Model: {agent_result['model']} · Decisions: {agent_result['steps']}/5 · Stop: {agent_result['stop_reason']}")
+        if agent_result['stop_reason'] != 'completed':
+            st.warning("The agent stopped without a completed evidence-based answer. Inspect the stop reason and trace.")
+        st.write(agent_result['answer'])
+        st.caption("Model interpretation is unverified. Use computed tool results as the source of truth.")
+        st.write("Tool Execution Trace")
+        if not agent_result['trace']:
+            st.info("No tools were executed.")
+        for entry in agent_result['trace']:
+            with st.expander(f"Step {entry['step']} · {entry['tool'] or 'Model response'} · {entry['status']}", expanded=True):
+                st.write("Input")
+                st.json(entry['input'])
+                st.write("Output summary (aggregate evidence)")
+                st.json(entry['output'])
+        st.caption(f"Loaded Skill SHA-256: {agent_result['skill_sha256']}")
