@@ -11,7 +11,7 @@
 - Flag potential numeric outliers using the 1.5×IQR rule.
 - Explore correlations between pairs of numeric columns and compare them with flagged rows excluded.
 - View a scatter plot and an auditable, rule-based findings report.
-- Optionally ask an **Ollama-hosted Llama 3.2 1B** model to explain a structured analysis summary, guided by an Agent Skill in `skills/data-quality-investigator/SKILL.md`.
+- Optionally ask a locally hosted open-weight model (**Qwen3 1.7B** by default, or Llama 3.2 1B) to explain a structured analysis summary, guided by an Agent Skill in `skills/data-quality-investigator/SKILL.md`.
 
 **Not yet implemented:** autonomous model-selected tools, multi-step agent planning, durable memory, advanced charting, or statistical significance tests. `agent.py` is a *basic deterministic harness*: it calls Python analysis tools before passing their outputs to the model. The team can expand it to add model-driven tool selection and memory for the hackathon.
 
@@ -19,7 +19,7 @@
 
 | Requirement | This starter |
 | --- | --- |
-| Open-weight model | Ollama + `llama3.2:1b` (optional at runtime; **run AI demo to satisfy requirement**) |
+| Open-weight model | Ollama + `qwen3:1.7b` (or `llama3.2:1b`; optional at runtime; **run AI demo to satisfy requirement**) |
 | Agent Skill | `skills/data-quality-investigator/SKILL.md`, loaded at runtime |
 | Harness | `agent.py` orchestrates Python statistics, skill loading, and LLM explanations; **expand for meaningful agentic behavior** |
 | Public, open-source submission | Publish this repository publicly with `LICENSE`, README, and a live demo |
@@ -41,7 +41,7 @@ Using Cursor to *write code* doesn't itself satisfy the open-weight requirement;
 4. For AI explanations, install [Ollama](https://ollama.com/download) and run:
 
    ```powershell
-   ollama pull llama3.2:1b
+   ollama pull qwen3:1.7b
    ```
 
    Open/keep Ollama running, then click **Explain with local AI** in the app. The app never sends uploaded CSV rows to a remote AI service by design; it passes a compact statistical report to the configured Ollama endpoint. Keep `OLLAMA_HOST` pointing at a trusted local endpoint if data privacy matters.
@@ -63,8 +63,8 @@ agent.py                 Scan orchestration + safe LLM context
 ai_explainer.py          Ollama model call
 skill_loader.py          Agent Skill file loading
 skills/data-quality-investigator/SKILL.md
-sample_data/demo.csv     Synthetic data for demo
-tests/test_analyzer.py    Initial unit tests
+sample_data/student_scores.csv  Synthetic data for demo
+test/test_analyzer.py    Initial unit tests
 .github/pull_request_template.md
 .github/workflows/tests.yml
 CONTRIBUTING.md
@@ -90,13 +90,13 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for Git branches, PRs, and team commands.
 
 ## Run tests
 
-```powershell
-.venv\Scripts\python.exe -m pytest -q
+```bash
+.venv/bin/python -m pytest -q
 ```
 
 ## Suggested 2-minute demo
 
-1. Upload `sample_data/demo.csv`.
+1. Load `sample_data/student_scores.csv`.
 2. Show missingness, outliers, correlation table, and the plot.
 3. Choose two numeric columns to compare sensitivity to flagged outliers.
 4. Turn on Ollama and generate an explanation grounded in calculated values.

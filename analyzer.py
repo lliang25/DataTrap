@@ -94,3 +94,93 @@ def numeric_correlations(
     if numeric.shape[1] < 2:
         return None
     return numeric.corr(min_periods=min_periods)
+
+
+def _json_number(value: Any) -> float | int | None:
+    if value is None or (isinstance(value, float) and pd.isna(value)):
+        return None
+    if isinstance(value, bool):
+        return int(value)
+    if isinstance(value, int):
+        return int(value)
+    number = float(value)
+    if not pd.notna(number) or number != number or number in (float("inf"), float("-inf")):
+        return None
+    return round(number, 4)
+
+
+def correlation_sensitivity(df: pd.DataFrame, x: str, y: str) -> dict[str, Any]:
+    """Compare a pairwise correlation with IQR-flagged rows excluded.
+
+    This is a sensitivity check, not evidence that the excluded rows are errors.
+    """
+    validate_dataframe(df)
+    if x == y or x not in df.columns or y not in df.columns:
+        raise ValueError("Choose two different existing columns.")
+    pair = df[[x, y]].apply(pd.to_numeric, errors="coerce").dropna()
+    if len(pair) < 3:
+        return {
+            "n": len(pair),
+            "correlation": None,
+            "filtered_n": None,
+            "filtered_correlation": None,
+            "removed": 0,
+        }
+    corr = pair[x].corr(pair[y])
+    flagged = row_has_iqr_outlier(df).reindex(pair.index).fillna(False).astype(bool)
+    filtered = pair.loc[~flagged]
+    corr2 = filtered[x].corr(filtered[y]) if len(filtered) >= 3 else None
+    return {
+        "n": int(len(pair)),
+        "correlation": _json_number(corr),
+        "filtered_n": int(len(filtered)),
+        "filtered_correlation": _json_number(corr2),
+        "removed": int(int(flagged.sum())),
+    }
+
+
+def scan(df: pd.DataFrame) -> dict[str, Any]:
+    """Build a compact, JSON-safe report of computed checks for the agent harness."""
+    validate_dataframe(df)
+    missing = missing_value_summary(df)
+    outliers = iqr_outlier_report(df)
+    outlier_rows = row_has_iqr_outlier(df)
+    corr = numeric_correlations(df)
+    outlier_payload: list[dict[str, Any]] = []
+    if not outliers.empty:
+        for rec in outliers.to_dict(orient="records"):
+            values = rec.get("outlier_values") or []
+            outlier_payload.append(
+                {
+                    "column": str(rec["column"]),
+                    "q1": _json_number(rec["q1"]),
+                    "q3": _json_number(rec["q3"]),
+                    "iqr": _json_number(rec["iqr"]),
+                    "lower_threshold": _json_number(rec["lower_threshold"]),
+                    "upper_threshold": _json_number(rec["upper_threshold"]),
+                    "outlier_count": int(rec["outlier_count"]),
+                    "outlier_values": [_json_number(v) for v in values[:12]],
+                }
+            )
+    correlations = None
+    if corr is not None:
+        correlations = {
+            str(col): {str(other): _json_number(val) for other, val in row.items()}
+            for col, row in corr.to_dict().items()
+        }
+    return {
+        "rows": int(len(df)),
+        "columns": int(df.shape[1]),
+        "column_names": [str(c) for c in df.columns],
+        "n_outlier_rows": int(outlier_rows.sum()),
+        "missing": [
+            {
+                "column": str(row["column"]),
+                "missing_count": int(row["missing_count"]),
+                "missing_pct": _json_number(row["missing_pct"]),
+            }
+            for row in missing.to_dict(orient="records")
+        ],
+        "iqr_outliers": outlier_payload,
+        "correlations": correlations,
+    }

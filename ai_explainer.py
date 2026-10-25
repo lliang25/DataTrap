@@ -1,9 +1,19 @@
 """Turn computed DataTrap results into a plain-English summary.
+
 This layer only restates numbers the analyzer already produced. It does
 not fetch outside evidence and should not be treated as a statistical audit.
 """
 from __future__ import annotations
+
+import json
+import os
+
 import pandas as pd
+
+DEFAULT_MODEL = os.getenv("DATATRAP_MODEL", "qwen3:1.7b")
+DEFAULT_HOST = os.getenv("OLLAMA_HOST", "http://localhost:11434")
+
+
 def summarize_findings(
     missing: pd.DataFrame,
     outliers: pd.DataFrame,
@@ -61,3 +71,45 @@ def summarize_findings(
             "Correlation is not causation."
         )
     return " ".join(parts)
+
+
+def explain(report: dict, skill: str) -> str:
+    """Ask a local open-weight model to explain computed findings only."""
+    try:
+        from ollama import Client
+
+        client = Client(host=DEFAULT_HOST, timeout=90)
+        messages = [
+            {
+                "role": "system",
+                "content": (
+                    skill
+                    + "\nUse only values in the report. Do not invent numbers. "
+                    "Explain uncertainty and give practical next checks."
+                ),
+            },
+            {
+                "role": "user",
+                "content": (
+                    "Explain this computed data-quality report:\n"
+                    + json.dumps(report, indent=2)
+                ),
+            },
+        ]
+        try:
+            response = client.chat(model=DEFAULT_MODEL, messages=messages, think=False)
+        except TypeError:
+            response = client.chat(model=DEFAULT_MODEL, messages=messages)
+        content = (
+            response["message"]["content"]
+            if isinstance(response, dict)
+            else response.message.content
+        )
+        if not content:
+            raise RuntimeError("The local model returned an empty explanation.")
+        return str(content)
+    except Exception as exc:
+        raise RuntimeError(
+            "Local Ollama explanation unavailable. Install Ollama, pull "
+            f"{DEFAULT_MODEL}, and keep the server running. Details: {exc}"
+        ) from exc

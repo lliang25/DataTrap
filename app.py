@@ -1,8 +1,11 @@
 """DataTrap Streamlit UI — upload a CSV, preview it, and inspect data-quality flags."""
 from __future__ import annotations
+
 import pandas as pd
 import streamlit as st
-from ai_explainer import summarize_findings
+
+from agent import analyze, explain_report
+from ai_explainer import DEFAULT_MODEL, summarize_findings
 from analyzer import (
     drop_flagged_outlier_rows,
     iqr_outlier_report,
@@ -11,6 +14,7 @@ from analyzer import (
     numeric_correlations,
     row_has_iqr_outlier,
 )
+
 st.set_page_config(page_title="DataTrap", layout="wide")
 st.title("DataTrap")
 st.caption("Question the data, not just the answers.")
@@ -19,6 +23,7 @@ st.info(
     "DataTrap flags those issues for investigation. It does not prove selection bias, "
     "causation, or that an outlier is a mistake."
 )
+
 uploaded = st.file_uploader("Upload a CSV dataset", type=["csv"])
 use_sample = st.checkbox("Or load the bundled sample dataset", value=uploaded is None)
 df: pd.DataFrame | None = None
@@ -29,11 +34,14 @@ if uploaded is not None:
 elif use_sample:
     df = pd.read_csv("sample_data/student_scores.csv")
     source_label = "sample_data/student_scores.csv"
+
 if df is None:
     st.stop()
+
 st.subheader("Preview")
 st.write(f"**Source:** {source_label} · **{len(df)} rows × {df.shape[1]} columns**")
-st.dataframe(df.head(25), use_container_width=True)
+st.dataframe(df.head(25), width="stretch")
+
 try:
     missing = missing_value_summary(df)
     outliers = iqr_outlier_report(df)
@@ -43,8 +51,9 @@ try:
 except (TypeError, ValueError) as exc:
     st.error(str(exc))
     st.stop()
+
 st.subheader("Missing values")
-st.dataframe(missing, use_container_width=True)
+st.dataframe(missing, width="stretch")
 if missing["missing_count"].sum() == 0:
     st.success("No missing values counted.")
 else:
@@ -52,6 +61,7 @@ else:
         "Missing values can quietly change totals, averages, and correlations. "
         "Ask how those gaps were produced before drawing a conclusion."
     )
+
 st.subheader("IQR outlier flags")
 st.write(
     "A value is flagged when it falls below **Q1 − 1.5×IQR** or above **Q3 + 1.5×IQR**. "
@@ -61,7 +71,7 @@ if outliers.empty:
     st.info("No numeric columns were available for an IQR scan.")
 else:
     display_outliers = outliers.drop(columns=["outlier_values"])
-    st.dataframe(display_outliers, use_container_width=True)
+    st.dataframe(display_outliers, width="stretch")
     flagged = outliers[outliers["outlier_count"] > 0]
     if flagged.empty:
         st.success("No IQR-flagged values in the numeric columns.")
@@ -73,14 +83,19 @@ else:
         with st.expander("Flagged values by column"):
             for _, row in flagged.iterrows():
                 st.write(f"**{row['column']}:** {row['outlier_values']}")
+
 st.subheader("Correlation exploration")
 st.caption("Correlation ≠ causation. A strong number can still be an artifact of missing data or a few extreme rows.")
 if corr is None:
     st.info("Need at least two numeric columns to compute correlations.")
 else:
-    st.dataframe(corr.round(3), use_container_width=True)
-st.subheader("Chart and outlier sensitivity")
+    st.dataframe(corr.round(3), width="stretch")
+
 numeric = numeric_columns(df)
+compare_x = numeric[0] if numeric else None
+compare_y = numeric[1] if len(numeric) > 1 else None
+
+st.subheader("Chart and outlier sensitivity")
 if not numeric:
     st.info("Add a numeric column to plot a chart.")
 else:
@@ -101,7 +116,7 @@ else:
     else:
         plot_df = chart_df[[x_col, y_col]].dropna()
         st.write(f"Plotting **{len(plot_df)}** rows ({view.lower()}).")
-        st.bar_chart(plot_df, x=x_col, y=y_col)
+        st.scatter_chart(plot_df, x=x_col, y=y_col)
     compare_left, compare_right = st.columns(2)
     with compare_left:
         st.metric("Rows in full dataset", len(df))
@@ -114,6 +129,35 @@ else:
                 f"Mean {y_col} (without flags)",
                 f"{pd.to_numeric(sensitivity_df[y_col], errors='coerce').mean():.2f}",
             )
+
+if len(numeric) >= 2:
+    st.subheader("Pairwise correlation sensitivity")
+    st.caption(
+        "Choose two numeric columns and compare the Pearson correlation with flagged rows excluded."
+    )
+    pair_left, pair_right = st.columns(2)
+    with pair_left:
+        compare_x = st.selectbox("First numeric column", numeric, index=0, key="sens_x")
+    with pair_right:
+        y_options = [c for c in numeric if c != compare_x]
+        compare_y = st.selectbox("Second numeric column", y_options, index=0, key="sens_y")
+    pair_report = analyze(df, compare_x, compare_y)["correlation_sensitivity"]
+    metric_left, metric_right, metric_removed = st.columns(3)
+    with metric_left:
+        st.metric(
+            f"Correlation ({pair_report['n']} overlapping rows)",
+            "n/a" if pair_report["correlation"] is None else f"{pair_report['correlation']:.3f}",
+        )
+    with metric_right:
+        st.metric(
+            f"Without IQR flags ({pair_report['filtered_n']} rows)",
+            "n/a"
+            if pair_report["filtered_correlation"] is None
+            else f"{pair_report['filtered_correlation']:.3f}",
+        )
+    with metric_removed:
+        st.metric("Overlapping rows removed", pair_report["removed"])
+
 st.subheader("Plain-English recap")
 st.write(
     summarize_findings(
@@ -127,3 +171,18 @@ st.write(
 st.caption(
     "This recap only restates calculated results. It is not independently verified statistical evidence."
 )
+
+st.divider()
+st.subheader("Explain with local AI")
+st.write(
+    f"Ask the locally hosted **{DEFAULT_MODEL}** model to explain the statistical findings. "
+    "Only the compact computed report is sent to Ollama — not the raw CSV rows."
+)
+
+if st.button("Explain with local AI"):
+    with st.spinner(f"{DEFAULT_MODEL} is explaining the computed report..."):
+        report = analyze(df, compare_x, compare_y)
+        try:
+            st.markdown(explain_report(report))
+        except Exception as error:
+            st.error(str(error))

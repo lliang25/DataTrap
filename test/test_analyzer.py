@@ -2,11 +2,13 @@ import unittest
 from pathlib import Path
 import pandas as pd
 from analyzer import (
+    correlation_sensitivity,
     drop_flagged_outlier_rows,
     iqr_outlier_report,
     missing_value_summary,
     numeric_correlations,
     row_has_iqr_outlier,
+    scan,
 )
 SAMPLE = Path(__file__).resolve().parents[1] / "sample_data" / "student_scores.csv"
 class AnalyzerTests(unittest.TestCase):
@@ -41,5 +43,40 @@ class AnalyzerTests(unittest.TestCase):
         reduced = drop_flagged_outlier_rows(self.df)
         self.assertEqual(len(reduced), len(self.df) - int(flagged.sum()))
         self.assertTrue((reduced["hours_studied"] != 40.0).all())
+
+    def test_scan_is_json_safe_and_counts_rows(self) -> None:
+        report = scan(self.df)
+        self.assertEqual(report["rows"], 20)
+        self.assertEqual(report["n_outlier_rows"], int(row_has_iqr_outlier(self.df).sum()))
+        self.assertIn("hours_studied", [item["column"] for item in report["iqr_outliers"]])
+
+    def test_correlation_changes_when_flagged_rows_are_removed(self) -> None:
+        result = correlation_sensitivity(self.df, "hours_studied", "exam_score")
+        self.assertGreaterEqual(result["n"], 3)
+        self.assertGreater(result["removed"], 0)
+        self.assertIsNotNone(result["correlation"])
+        self.assertNotEqual(result["correlation"], result["filtered_correlation"])
+class SkillAndHarnessTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.df = pd.read_csv(SAMPLE)
+
+    def test_skill_file_has_frontmatter(self) -> None:
+        from skill_loader import load_skill
+
+        skill = load_skill()
+        self.assertTrue(skill.startswith("---\n"))
+        self.assertIn("data-quality-investigator", skill)
+
+    def test_agent_analyze_includes_sensitivity_pair(self) -> None:
+        import json
+        from agent import analyze
+
+        report = analyze(self.df, "hours_studied", "exam_score")
+        self.assertIn("correlation_sensitivity", report)
+        self.assertEqual(report["correlation_sensitivity"]["x"], "hours_studied")
+        json.dumps(report)
+
+
+
 if __name__ == "__main__":
     unittest.main()
