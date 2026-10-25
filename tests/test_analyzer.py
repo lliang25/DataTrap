@@ -92,9 +92,9 @@ def test_sample_shows_sensitivity():
     assert result['before']['pearson_r'] < 0
 
 
-def test_student_scores_expected_statistics():
+def test_demo_expected_statistics():
     from pathlib import Path
-    df = pd.read_csv(Path(__file__).parents[1] / 'sample_data/student_scores.csv')
+    df = pd.read_csv(Path(__file__).parents[1] / 'sample_data/demo.csv')
     assert df.shape == (13, 3)
     missing = missing_value_summary(df).set_index('column')
     assert missing['missing_count'].to_dict() == {'exam_score': 1, 'hours_studied': 1, 'attendance_pct': 0}
@@ -109,3 +109,41 @@ def test_student_scores_expected_statistics():
     assert result['after']['n'] == 10
     assert result['before']['pearson_r'] == pytest.approx(-0.6442771031252582)
     assert result['after']['pearson_r'] == pytest.approx(1)
+
+
+def test_merged_student_scores_statistics_and_pair_scope():
+    from pathlib import Path
+    from statistics import correlation
+    df = pd.read_csv(Path(__file__).parents[1] / 'sample_data/student_scores.csv')
+    assert df.shape == (20, 6)
+    report = analyze(df, 'hours_studied', 'exam_score')
+    missing = {row['column']: row['missing_count'] for row in report['missing']}
+    assert missing == {'student_id': 0, 'hours_studied': 1, 'practice_tests': 1,
+                       'exam_score': 0, 'tutor_hours': 0, 'survey_rating': 1}
+    assert report['nonfinite_count'] == 0
+    assert report['n_outlier_rows'] == 3  # Includes two survey-rating flags.
+    sensitivity = report['correlation_sensitivity']
+    assert sensitivity['flagged_rows'] == 1  # Only S15 is flagged for this pair.
+    assert sensitivity['before']['n'] == 19
+    assert sensitivity['after']['n'] == 18
+    # Independently compute the known fixture expectation using stdlib statistics.
+    complete = df[['hours_studied', 'exam_score']].dropna()
+    filtered = df.loc[df.student_id != 'S15', ['hours_studied', 'exam_score']].dropna()
+    assert sensitivity['before']['pearson_r'] == pytest.approx(correlation(*complete.to_numpy().T))
+    assert sensitivity['after']['pearson_r'] == pytest.approx(correlation(*filtered.to_numpy().T))
+
+
+def test_analyze_contract_is_shared_and_json_safe():
+    df = pd.DataFrame({'x': [1, 2, 3, np.inf, None], 'y': [2, 4, 6, 8, 10],
+                       'constant': [1] * 5, 'unrelated': [0, 0, 0, 0, 100]})
+    report = analyze(df, 'x', 'y')
+    for key, value in scan(df).items():
+        assert report[key] == value
+    for key, value in correlation_sensitivity(df, 'x', 'y').items():
+        assert report['correlation_sensitivity'][key] == value
+    assert report['nonfinite_count'] == 1
+    assert report['correlation_sensitivity']['flagged_rows'] == 0
+    assert report['correlations']['constant']['x'] is None
+    assert report['row_count'] == report['n_rows']
+    assert report['missing_values'] == report['missing']
+    json.dumps(report, allow_nan=False)

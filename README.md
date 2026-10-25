@@ -6,6 +6,7 @@
 
 ## What works in this starter
 
+- Click **Investigate Dataset** in **DataTrap Detective Mode** for a proactive, evidence-based investigation.
 - Ask natural-language questions in **Ask DataTrap**: a local model chooses safe analysis tools and shows a Tool Execution Trace.
 - Upload a CSV or use the included synthetic sample dataset.
 - Preview rows and count missing values per column.
@@ -65,11 +66,13 @@ app.py                   Streamlit interface
 analyzer.py              Deterministic stats and checks
 agent.py                 Model-directed agent loop + original dashboard helpers
 agent_tools.py           Four read-only tools with argument validation
+detective.py             Bounded proactive scan, AI selection, grounded report
 ai_explainer.py          Ollama model call
 skill_loader.py          Agent Skill file loading
 skills/data-quality-investigator/SKILL.md
 sample_data/demo.csv     Synthetic data for demo
-sample_data/student_scores.csv  Same synthetic fixture, for upload verification
+sample_data/student_scores.csv  20-row, 6-column synthetic student dataset
+sample_data/sensor_gaps.csv     Missing sensor readings without numeric IQR flags
 tests/                   Statistics, AI boundary, and Streamlit regression tests
 .github/pull_request_template.md
 .github/workflows/tests.yml
@@ -185,6 +188,90 @@ size limits reject oversized requests. The model may still choose unnecessary to
 misinterpret results; the trace is the evidence. Tool selection and prompt compliance
 can vary between model versions. There is no persistent conversational memory.
 
+## DataTrap Detective Mode
+
+Upload a CSV, then click **Investigate Dataset**. No question is needed. The existing
+dashboard and **Ask DataTrap** remain independent and work as before.
+
+```text
+CSV → bounded deterministic scan → evidence-backed hypothesis candidates
+    → Skill + local Qwen selects a hypothesis, tool and pair
+    → strict allowlist validation → one existing safe tool
+    → deterministic report + evidence + expandable execution trace
+```
+
+**What the AI actually decides:** Python proposes testable hypotheses from measured
+missingness, IQR flags, and strong-correlation candidates. Qwen chooses which hypothesis
+and column pair warrant investigation, and returns the matching tool and arguments.
+It can select sensitivity analysis for a flagged/strong relationship, or correlation
+analysis for a previously unexamined pair involving an incomplete/flagged column.
+There is no fixed winning pair or fallback tool sequence. The validated choice is
+executed through `agent_tools.execute_tool`; statistical calculations reuse the existing
+analyzer. The model does not write the final evidence or numerical conclusions.
+
+The report contains the scan scope and signals, selected hypothesis, tool name and
+inputs, actual returned evidence, an observation, limitations, and a recommendation.
+Hypotheses and recommendations use constrained templates; observations derive from tool
+outputs. Arbitrary model prose is not displayed. All measured statistics come from tools.
+This reduces the risk of a small model inventing statistics or reversing a comparison.
+Hypotheses are questions, not claims of errors, causality, or statistical significance.
+
+### Scope and stopping rules
+
+- Use only the first **10,000 rows** and first **12 columns**, in CSV order; this is not
+  a random or representative sample. Column names longer than 120 characters are
+  excluded explicitly, with the count shown.
+- Scan missingness in those columns; scan IQR flags in their first **6 numeric columns**.
+- Inspect only the first **3 numeric pairs**, in column order, for candidate correlations.
+- Triggers are any missing cells, any IQR flags, or an observed absolute Pearson r of
+  at least **0.8**. That threshold is a discovery heuristic, not a significance test.
+- Offer at most **12 hypotheses**. The displayed scope and trace identify what was checked.
+- Make **one model decision** and at most **one follow-up tool call**: at most six total
+  calls including the scan, no repeated analyses, no retries or extra model summary call.
+  This deliberately stays below the existing agent's five-decision limit.
+- Cap prompt text at 24,000 characters and model action text at 4,000 characters.
+  An oversized request returns a partial report rather than silently truncating evidence.
+- Run all checks on a bounded copy. Uploaded data are never edited, deleted, or saved over.
+
+**Failure behavior:** if Ollama is unavailable, the configured model is missing, the
+Skill cannot be loaded, the action is malformed/unsupported, or a tool fails, the report
+is labeled **partial** and does not claim AI success. Completed scan evidence remains
+available. Start Ollama and install `qwen3:1.7b` if needed. No suspicious triggers, or
+signals without a supported new follow-up (for example, only missing text fields),
+produce a **scan-only** report without contacting the model. Neither result proves
+that the full dataset is clean.
+
+**Caching:** the result is stored in session state using the dataset content, column
+names/types and index. Reruns and repeated clicks reuse it; a changed dataset clears
+it. To retry after starting Ollama or changing model/Skill configuration, click
+**Clear Detective report / enable retry**, then **Investigate Dataset** again.
+
+**Local configuration:** Detective Mode uses `OLLAMA_HOST` and `DATATRAP_AGENT_MODEL`
+(default `qwen3:1.7b`), exactly like Ask DataTrap. Keep the host local; no paid API,
+cloud model, new package dependency, or automatic model download is required. The model
+receives aggregate evidence and column labels, not raw rows. Labels and tool outputs
+are treated as untrusted data; only predefined validated actions may run.
+
+### Hackathon walkthrough
+
+1. Start Ollama and Streamlit using the commands above, with `qwen3:1.7b` installed.
+2. Upload `sample_data/demo.csv` (13 rows, 3 columns), then click **Investigate Dataset**.
+3. Inspect the missingness and IQR scan evidence, then the model's selected hypothesis.
+4. If Qwen selects study-hours/score sensitivity, the tool reports original r around
+   **−0.6443 (n=11)** and filtered r around **1.0000 (n=10)**. The report describes the
+   increase without claiming causation or recommending automatic row deletion.
+5. Expand **Detective Tool Execution Trace** to distinguish deterministic scan calls
+   from the single model-selected follow-up. Another valid choice may inspect a different pair.
+6. Upload `sample_data/sensor_gaps.csv` and investigate again. Its main signal is missing
+   voltage readings, not the student-score pattern. The available follow-up examines
+   a previously unscanned pair's correlation and complete-pair coverage.
+
+Run `python -m pytest -q` in the activated virtual environment for the offline suite.
+`tests/test_detective.py` uses mocked model decisions while keeping real tool calculations;
+it covers both fixtures, selection, grounding, failures, bounded work, and untrusted data.
+Streamlit tests cover caching, retries and dataset changes. The opt-in real-model tests
+remain separate and require local Ollama.
+
 ## Team roles (suggested)
 
 - **Analysis:** `analyzer.py` and tests.
@@ -212,7 +299,17 @@ DATATRAP_TEST_OLLAMA=1 .venv/bin/python -m pytest -q -s tests/test_ollama_integr
 
 This sends only bundled synthetic data summaries to localhost. It checks real generation metadata, different outputs for different reports, the exact Skill text in the system message, model-selected tool sequences, and a Skill-policy A/B test. The agent tests use the installed Qwen model; the original recap test uses Llama. Regular tests skip this check so CI does not require a model. Passing it confirms integration, not factual correctness of model prose.
 
-`sample_data/student_scores.csv` is a copy of the synthetic demo, not a real student dataset.
+The sample files are distinct synthetic datasets, not real student records:
+
+- `demo.csv`: 13 rows and 3 columns; the study-hours/score relationship reverses after filtering.
+- `student_scores.csv`: 20 rows and 6 columns; includes a student identifier, practice tests,
+  tutor hours and survey ratings. For hours/score, the original r is approximately 0.2691
+  (n=19), increasing to 0.9964 (n=18) after excluding the flagged hours observation.
+  Survey-rating flags do not remove rows from this selected-pair comparison.
+- `sensor_gaps.csv`: a separate missing-sensor-readings example.
+
+Tests retain the exact `demo.csv` regression values and separately verify the larger
+student dataset. Neither file should be overwritten merely to satisfy the other's tests.
 
 ## Suggested 2-minute demo
 

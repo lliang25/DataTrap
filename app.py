@@ -146,3 +146,49 @@ if "agent_result" in st.session_state:
                 st.write("Output summary (aggregate evidence)")
                 st.json(entry['output'])
         st.caption(f"Loaded Skill SHA-256: {agent_result['skill_sha256']}")
+
+st.subheader("DataTrap Detective Mode")
+st.caption("Investigate this dataset with a bounded scan and one local-model-selected follow-up. The scope, verified evidence, and tool calls are shown below.")
+from detective import investigate_dataset
+if "detective_result" in st.session_state and st.session_state["detective_result"][0] != dataset_key:
+    del st.session_state["detective_result"]
+if st.button("Investigate Dataset"):
+    # Repeated clicks and ordinary widget reruns reuse the same dataset result.
+    if "detective_result" not in st.session_state:
+        try:
+            with st.spinner("Scanning the dataset and asking Ollama to select one investigation…"):
+                investigation = investigate_dataset(df)
+            st.session_state["detective_result"] = (dataset_key, investigation)
+        except (TypeError, ValueError) as exc:
+            st.error(f"Could not investigate this dataset: {exc}")
+if "detective_result" in st.session_state:
+    _, investigation = st.session_state["detective_result"]
+    st.caption(f"Status: {investigation['status']} · Stop: {investigation['stop_reason']} · Model decisions: {investigation['model_decisions']} · Tool calls: {investigation['tool_calls']}")
+    if investigation['status'] == 'partial':
+        st.warning("Partial report — AI investigation did not succeed. Only completed scan results are verified.")
+    elif investigation['status'] == 'scan_only':
+        st.info("Scan-only report — no AI follow-up was performed. See the scope and limitations.")
+    st.write("Scan scope")
+    st.json(investigation['scope'])
+    st.write("Scan summary: verified signals")
+    st.json(investigation['signals'])
+    with st.expander("All verified scan results"):
+        st.json(investigation['scan'])
+    if investigation['selected_hypothesis']:
+        st.write("Selected hypothesis (a question to test, not a conclusion)")
+        st.json(investigation['selected_hypothesis'])
+    for finding in investigation['findings']:
+        st.write(finding['title'])
+        st.text(finding['hypothesis'])
+        st.json(finding['evidence'])
+        st.text(finding['observation'])
+        st.text(finding['recommendation'])
+        st.text(finding['limitation'])
+    st.write("Limitations")
+    for limitation in investigation['limitations']:
+        st.text(limitation)
+    with st.expander("Detective Tool Execution Trace"):
+        st.json(investigation['trace'])
+    if st.button("Clear Detective report / enable retry"):
+        del st.session_state["detective_result"]
+        st.rerun()

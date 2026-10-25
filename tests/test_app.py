@@ -73,10 +73,12 @@ def test_student_scores_upload_bytes_are_parsed(monkeypatch):
     assert not app.exception
     assert not app.error
     assert app.checkbox[0].value is False
-    assert [m.value for m in app.metric if m.label == 'Complete pairs (n)'] == ['11', '10']
-    assert [m.value for m in app.metric if m.label == 'Pearson r'] == ['-0.6443', '1.0000']
+    assert [m.value for m in app.metric if m.label == 'Complete pairs (n)'] == ['18', '17']
+    assert [m.value for m in app.metric if m.label == 'Pearson r'] == ['0.2325', '0.9666']
     missing = app.dataframe[1].value.set_index('column')
-    assert missing.loc['exam_score', 'missing_count'] == 1
+    assert missing.loc['exam_score', 'missing_count'] == 0
+    assert missing.loc['hours_studied', 'missing_count'] == 1
+    assert missing.loc['practice_tests', 'missing_count'] == 1
     outliers = app.dataframe[2].value.set_index('column')
     assert outliers.loc['hours_studied', 'outlier_count'] == 1
 
@@ -114,3 +116,35 @@ def test_ask_agent_empty_question_has_friendly_error():
     next(b for b in app.button if b.label == 'Run Agent').click().run(timeout=20)
     assert not app.exception
     assert 'Enter a question' in app.error[0].value
+
+
+def test_detective_caches_results_and_clears_changed_dataset(monkeypatch):
+    import detective
+    calls = []
+    original = detective.investigate_dataset
+    class Offline:
+        def chat(self, **kwargs):
+            raise ConnectionError('Offline')
+    def investigate(frame):
+        calls.append(frame.copy())
+        return original(frame, client=Offline())
+    monkeypatch.setattr(detective, 'investigate_dataset', investigate)
+    app = AppTest.from_file(str(APP)).run(timeout=20)
+    assert not calls
+    next(b for b in app.button if b.label == 'Investigate Dataset').click().run(timeout=20)
+    assert not app.exception
+    assert len(calls) == 1
+    assert any('Partial report' in w.value for w in app.warning)
+    app.run(timeout=20)
+    next(b for b in app.button if b.label == 'Investigate Dataset').click().run(timeout=20)
+    assert len(calls) == 1
+    assert any(b.label == 'Run Agent' for b in app.button)
+    next(b for b in app.button if b.label == 'Clear Detective report / enable retry').click().run(timeout=20)
+    assert 'detective_result' not in app.session_state
+    next(b for b in app.button if b.label == 'Investigate Dataset').click().run(timeout=20)
+    assert len(calls) == 2
+    monkeypatch.setattr(pd, 'read_csv', lambda *args, **kwargs: pd.DataFrame({'changed': [1, 2, 3]}))
+    app.run(timeout=20)
+    assert not app.exception
+    assert 'detective_result' not in app.session_state
+    assert len(calls) == 2

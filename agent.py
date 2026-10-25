@@ -1,50 +1,39 @@
 """Deterministic dashboard helpers and a bounded, model-directed analysis agent."""
 from __future__ import annotations
 import pandas as pd
-from analyzer import (
-    drop_flagged_outlier_rows,
-    iqr_outlier_report,
-    missing_value_summary,
-    numeric_correlations,
-    row_has_iqr_outlier,
-)
+from analyzer import scan, correlation_sensitivity, numeric_correlations
 from skill_loader import load_skill
 from ai_explainer import explain
 
 
 def analyze(df: pd.DataFrame, x: str | None = None, y: str | None = None) -> dict:
-    missing = missing_value_summary(df)
-    outliers = iqr_outlier_report(df)
+    # One canonical calculation shared by the dashboard, tools and AI context.
+    report = scan(df)
     correlations = numeric_correlations(df)
-    # Send only summary statistics to the model, never the individual flagged values.
-    outlier_records = outliers.drop(columns=["outlier_values"], errors="ignore")
-    report = {
-        "row_count": len(df),
-        "column_count": len(df.columns),
-        "missing_values": missing.to_dict(orient="records"),
-        "iqr_outliers": outlier_records.to_dict(orient="records"),
-        "rows_with_outlier_flags": int(row_has_iqr_outlier(df).sum()),
-        "correlations": correlations.to_dict() if correlations is not None else None,
+    report.update({
+        # Keep the merged report's aliases for existing callers, without maintaining
+        # a second set of statistics or leaking NaN into the model's JSON input.
+        "row_count": report["n_rows"],
+        "column_count": report["n_columns"],
+        "missing_values": report["missing"],
+        "iqr_outliers": report["outliers"],
+        "rows_with_outlier_flags": report["n_outlier_rows"],
+        "correlations": (correlations.astype(object).where(correlations.notna(), None).to_dict()
+                         if correlations is not None else None),
         "caveats": [
             "IQR outlier flags are investigation clues, not proven errors.",
             "Correlation does not establish causation.",
         ],
-    }
+    })
     if x and y and x != y:
-        if x not in df.columns or y not in df.columns:
-            raise ValueError("Both selected columns must exist in the dataset.")
-        if x not in df.select_dtypes(include="number") or y not in df.select_dtypes(include="number"):
-            raise ValueError("Correlation sensitivity requires two numeric columns.")
-        reduced = drop_flagged_outlier_rows(df)
-        full_corr = df[[x, y]].corr(min_periods=3).iloc[0, 1]
-        reduced_corr = reduced[[x, y]].corr(min_periods=3).iloc[0, 1]
+        sensitivity = correlation_sensitivity(df, x, y)
         report["correlation_sensitivity"] = {
-            "x": x,
-            "y": y,
-            "correlation_all_rows": None if pd.isna(full_corr) else float(full_corr),
-            "correlation_without_flagged_rows": None if pd.isna(reduced_corr) else float(reduced_corr),
+            "x": x, "y": y, **sensitivity,
+            "correlation_all_rows": sensitivity["before"]["pearson_r"],
+            "correlation_without_flagged_rows": sensitivity["after"]["pearson_r"],
+            # Legacy total-row counts are separate from complete-pair n.
             "rows_all": len(df),
-            "rows_without_flagged_rows": len(reduced),
+            "rows_without_flagged_rows": len(df) - sensitivity["flagged_rows"],
         }
     return report
 
