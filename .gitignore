@@ -1,0 +1,34 @@
+# Virtual environments and Python cache
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Secrets and machine-specific configuration
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# User-uploaded data, local analysis and model state
+uploads/
+private_data/
+memory.json
+*.db
+*.sqlite3
+
+# Editor and OS clutter
+.DS_Store
+Thumbs.db
+.vscode/
+.cursor/index/
+
+# Build artifacts
+dist/
+build/
+*.egg-info/
