@@ -19,11 +19,13 @@ def analyze(df: pd.DataFrame, x: str | None = None, y: str | None = None) -> dic
     missing = missing_value_summary(df)
     outliers = iqr_outlier_report(df)
     correlations = numeric_correlations(df)
+    # Send only summary statistics to the model, never the individual flagged values.
+    outlier_records = outliers.drop(columns=["outlier_values"], errors="ignore")
     report = {
         "row_count": len(df),
         "column_count": len(df.columns),
         "missing_values": missing.to_dict(orient="records"),
-        "iqr_outliers": outliers.to_dict(orient="records"),
+        "iqr_outliers": outlier_records.to_dict(orient="records"),
         "rows_with_outlier_flags": int(row_has_iqr_outlier(df).sum()),
         "correlations": correlations.to_dict() if correlations is not None else None,
         "caveats": [

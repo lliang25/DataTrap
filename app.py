@@ -1,7 +1,9 @@
 """DataTrap Streamlit UI — upload a CSV, preview it, and inspect data-quality flags."""
 from __future__ import annotations
+import json
 import pandas as pd
 import streamlit as st
+from agent import analyze, explain_report
 from ai_explainer import summarize_findings
 from analyzer import (
     drop_flagged_outlier_rows,
@@ -127,3 +129,35 @@ st.write(
 st.caption(
     "This recap only restates calculated results. It is not independently verified statistical evidence."
 )
+
+st.subheader("Explain with local AI")
+st.write(
+    "Ollama can explain the computed summary in beginner friendly language. "
+    "The model receives summary statistics, not the uploaded rows."
+)
+ai_report = analyze(df)
+report_signature = json.dumps(ai_report, sort_keys=True, default=str)
+saved_signature = st.session_state.get("ai_report_signature")
+if saved_signature != report_signature:
+    st.session_state.pop("ai_explanation", None)
+    st.session_state["ai_report_signature"] = report_signature
+
+if st.button("Explain with local AI", type="primary"):
+    with st.spinner("Asking the local Ollama model to explain the findings..."):
+        try:
+            st.session_state["ai_explanation"] = explain_report(ai_report)
+            st.session_state["ai_report_signature"] = report_signature
+            st.session_state.pop("ai_explanation_error", None)
+        except Exception as exc:
+            st.session_state.pop("ai_explanation", None)
+            st.session_state["ai_explanation_error"] = str(exc)
+
+if st.session_state.get("ai_explanation_error"):
+    st.error(
+        "Could not get an explanation from Ollama. Make sure Ollama is running "
+        "and the configured model is downloaded (default: llama3.2:1b). "
+        f"Details: {st.session_state['ai_explanation_error']}"
+    )
+elif st.session_state.get("ai_explanation"):
+    st.markdown(st.session_state["ai_explanation"])
+    st.caption("Generated from the computed summary by your configured Ollama endpoint.")
