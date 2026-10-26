@@ -74,7 +74,7 @@ def mascot_html(state, asset_dir=ASSET_DIR):
 def render_header(state):
     title, description = STATES[state]
     st.markdown(f'''<div class="dt-brand"><span class="dt-logo" aria-hidden="true">D<span>?</span></span><strong>DataTrap</strong><span class="dt-brand-note">LAVENDER LAB</span><span class="dt-local">Local AI · Open weights</span></div>
-<section class="dt-hero" aria-label="DataTrap overview"><div class="dt-hero-copy"><span class="dt-eyebrow">YOUR AI DATA DETECTIVE</span><h1>Every dataset<br>has a story.</h1><p class="dt-intro">Find the missing pieces. Question the unexpected.<br>Let the evidence lead the way.</p><div class="dt-state" data-mascot-state="{state}"><strong>{escape(title)}</strong><p>{escape(description)}</p></div><nav class="dt-nav" aria-label="Dashboard sections"><a href="#detective-mode">Investigate dataset ↗</a><a href="#ask-datatrap">Ask a question →</a></nav></div><div class="dt-hero-art">{mascot_html(state)}</div></section>''', unsafe_allow_html=True)
+<section class="dt-hero" aria-label="DataTrap overview"><div class="dt-hero-copy"><span class="dt-eyebrow">YOUR AI DATA DETECTIVE</span><h1>Every dataset has a story.</h1><p class="dt-intro">Find the missing pieces. Question the unexpected.<br>Let the evidence lead the way.</p><div class="dt-state" data-mascot-state="{state}"><strong>{escape(title)}</strong><p>{escape(description)}</p></div><nav class="dt-nav" aria-label="Dashboard sections"><a href="#detective-mode">Investigate dataset ↗</a><a href="#ask-datatrap">Ask a question →</a></nav></div><div class="dt-hero-art">{mascot_html(state)}</div></section>''', unsafe_allow_html=True)
 
 
 def inject_styles():
