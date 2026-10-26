@@ -1,0 +1,74 @@
+:root { --dt-bg:#F8F5FF; --dt-primary:#895BD5; --dt-secondary:#C7A7F5; --dt-ink:#34264F; --dt-muted:#8B77AA; --dt-line:#E9DEF8; }
+[data-testid="stAppViewContainer"] { background:var(--dt-bg); color:var(--dt-ink); }
+[data-testid="stHeader"] { background:rgba(248,245,255,.94); }
+[data-testid="stMainBlockContainer"] { max-width:1240px; padding-top:2rem; padding-bottom:4rem; }
+h1,h2,h3 { color:var(--dt-ink); letter-spacing:-.025em; }
+[data-testid="stCaptionContainer"] { color:var(--dt-muted); }
+[data-testid="stMetric"], [data-testid="stForm"], [data-testid="stFileUploader"] { background:white; border:1px solid var(--dt-line); border-radius:20px; padding:20px; box-shadow:0 6px 22px #34264f05; }
+[data-testid="stMetricValue"] { color:var(--dt-ink); }
+[data-testid="stButton"] button, [data-testid="stFormSubmitButton"] button { border-radius:12px; padding:.6rem 1.1rem; font-weight:600; border-color:var(--dt-secondary); }
+[data-testid="stButton"] button[kind="primary"], [data-testid="stFormSubmitButton"] button[kind="primary"] { background:var(--dt-primary); color:white; border:0; box-shadow:0 4px 12px #895bd529; }
+[data-testid="stExpander"] { background:white; border-radius:16px; }
+[data-testid="stDataFrame"] { border:1px solid var(--dt-line); border-radius:16px; overflow:hidden; }
+[data-testid="stAlert"] { border-radius:16px; }
+a:focus-visible, button:focus-visible { outline:3px solid var(--dt-secondary); outline-offset:4px; }
+.dt-brand { display:flex; align-items:center; gap:12px; margin:0 0 24px; font-size:23px; letter-spacing:-.5px; }
+.dt-logo { display:inline-flex; align-items:center; justify-content:center; width:39px; height:39px; border-radius:13px; background:var(--dt-primary); color:white; font-weight:800; font-size:23px; }
+.dt-logo span { color:#e9d8ff; font-size:17px; }
+.dt-brand-note { font-size:10px; color:var(--dt-muted); letter-spacing:2px; margin-left:10px; }
+.dt-local { margin-left:auto; padding:7px 12px; border:1px solid var(--dt-line); border-radius:30px; font-size:11px; letter-spacing:.3px; color:#66517F; background:white; }
+.dt-hero { display:grid; grid-template-columns:1.4fr .6fr; align-items:center; border:1px solid var(--dt-line); border-radius:24px; background:linear-gradient(105deg,#F0E6FE 0%,#fff 72%); overflow:hidden; box-shadow:0 12px 40px #34264f08; }
+.dt-hero-copy { padding:36px 40px; }
+.dt-eyebrow { display:block; font-size:10px; font-weight:700; letter-spacing:1.7px; color:#7955AC; margin-bottom:10px; }
+.dt-hero h1 { font-size:clamp(32px,4.6vw,54px); line-height:1.1; font-weight:750; margin:12px 0 18px; padding:0; }
+.dt-intro { color:#725F8D; font-size:16px; line-height:1.7; }
+.dt-state { margin-top:22px; max-width:520px; }
+.dt-state strong { font-size:15px; }
+.dt-state p { font-size:13px; color:#725F8D; line-height:1.6; margin-top:5px; }
+.dt-nav { display:flex; gap:22px; flex-wrap:wrap; margin-top:20px; }
+.dt-nav a { font-size:13px; color:#7145B6; text-decoration:none; font-weight:650; }
+.dt-hero-art { display:flex; justify-content:center; align-items:center; padding:14px 20px; min-width:0; }
+.dt-mascot { width:auto; max-width:100%; height:310px; object-fit:contain; transform-origin:50% 75%; }
+.dt-neutral { display:flex; flex-direction:column; gap:15px; align-items:center; justify-content:center; min-height:200px; color:#7955AC; font-size:13px; text-align:center; }
+.dt-orbit { font-size:72px; font-weight:200; }
+.dt-happy { animation:dt-float 5s ease-in-out infinite; }
+.dt-confused { animation:dt-tilt 6s ease-in-out infinite; }
+.dt-surprised { animation:dt-bounce 1.5s ease-in-out 2; }
+@keyframes dt-float { 0%,100% {transform:translateY(0)} 50% {transform:translateY(-7px)} }
+@keyframes dt-tilt { 0%,100% {transform:rotate(0)} 25% {transform:rotate(-2deg)} 75% {transform:rotate(2deg)} }
+@keyframes dt-bounce { 0%,100% {transform:translateY(0)} 35% {transform:translateY(-9px)} 65% {transform:translateY(-3px)} }
+.dt-section { display:flex; align-items:flex-start; gap:14px; margin:36px 0 14px; scroll-margin-top:80px; }
+.dt-section-number { background:#EDE2FC; color:#7955AC; font-size:12px; font-weight:700; border-radius:12px; padding:10px; margin-top:2px; }
+.dt-section h2 { font-size:23px; font-weight:700; margin:0 0 5px; padding:0; }
+.dt-section p { color:var(--dt-muted); font-size:14px; margin:0; }
+.dt-card { padding:23px 25px; border:1px solid var(--dt-line); border-radius:20px; background:white; box-shadow:0 5px 18px #34264f04; margin:6px 0 12px; overflow-wrap:anywhere; }
+.dt-card h3 { font-size:18px; font-weight:650; padding:0; margin:0 0 9px; }
+.dt-card p { font-size:14px; color:#6C597F; line-height:1.7; margin:0; white-space:pre-line; }
+.dt-facts { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); border:1px solid var(--dt-line); border-radius:18px; padding:8px 18px; background:white; gap:12px; margin:8px 0 18px; }
+.dt-facts div { padding:12px 0; overflow-wrap:anywhere; }
+.dt-facts span { display:block; font-size:12px; color:var(--dt-muted); margin-bottom:6px; }
+.dt-facts strong { font-size:24px; font-weight:650; color:var(--dt-ink); }
+@media (max-width:700px) { .dt-brand-note {display:none} .dt-local {font-size:9px} .dt-hero {grid-template-columns:1fr} .dt-hero-copy {padding:26px} .dt-hero-art {padding:0 20px 18px} .dt-mascot {height:210px} .dt-section h2 {font-size:21px} .dt-facts strong {font-size:20px} }
+@media (prefers-reduced-motion:reduce) { .dt-mascot {animation:none !important; transform:none !important;} }
+
+/* Compact overview; the verified investigation is the primary content. */
+.dt-brand { margin-bottom:12px; }
+.dt-hero-copy { padding:18px 28px; }
+.dt-hero h1 { font-size:clamp(24px,3vw,32px); margin:4px 0 8px; }
+.dt-hero h1 br, .dt-intro br { display:none; }
+.dt-intro { font-size:14px; line-height:1.4; margin:6px 0; }
+.dt-state { margin-top:10px; }
+.dt-state p { margin-bottom:0; line-height:1.4; }
+.dt-nav { margin-top:10px; }
+.dt-hero .dt-mascot { height:155px; }
+.dt-hero .dt-neutral { min-height:100px; }
+.dt-result-mascot { text-align:center; }
+.dt-result-mascot .dt-mascot { height:180px; }
+.dt-card:has(h3#investigation-result) { border-color:var(--dt-secondary); background:#F4ECFF; }
+@media (max-width:700px) {
+  .dt-hero { grid-template-columns:1fr auto; }
+  .dt-hero-copy { padding:16px; }
+  .dt-hero-art { padding:8px; }
+  .dt-hero .dt-mascot { height:110px; }
+  .dt-hero .dt-state p { display:none; }
+}
