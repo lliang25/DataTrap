@@ -272,6 +272,47 @@ it covers both fixtures, selection, grounding, failures, bounded work, and untru
 Streamlit tests cover caching, retries and dataset changes. The opt-in real-model tests
 remain separate and require local Ollama.
 
+## Lavender Lab dashboard
+
+The dashboard presents upload/sample selection, dataset overview, Detective Mode,
+evidence tables, correlation/sensitivity charts, and Ask DataTrap in that order.
+Choose a bundled sample from **Sample dataset**, or upload your own CSV. Click
+**Investigate Dataset** for a cached investigation; changing the dataset clears stale
+results. Findings appear as Scan Summary, Selected Hypothesis, Investigation Result,
+Verified Evidence, Suggested Next Steps, and Limitations. Full JSON and Tool Execution
+Trace remain available in expanders. A model-selected hypothesis is a question to
+test, not verified evidence; numerical evidence still comes from the existing tools.
+
+`ui_components.py` contains reusable presentation and mascot-state helpers;
+`assets/lavender.css` and `.streamlit/config.toml` define the theme. Analysis algorithms,
+Agent Loop, and Detective Mode remain unchanged. Original mascot PNGs are stored
+without resizing or re-encoding in `assets/mascots/`.
+
+- **Surprised:** verified sensitivity output has finite Pearson correlations with
+  opposite nonzero signs and a positive count of excluded IQR-flagged observations.
+- **Confused:** missing values or IQR-flagged observations are detected without a
+  verified reversal.
+- **Happy:** the relevant analysis is complete, no missing values or IQR flags are
+  detected, and there is no higher-priority warning. This is not a guarantee of quality.
+- **Neutral:** analysis is unavailable/incomplete or a warning prevents a clean result.
+  Model prose never determines the mascot. Known issues still take priority over neutral.
+
+The mascots float, tilt, or briefly bounce using CSS only. Animations respect
+`prefers-reduced-motion`; missing assets display a text fallback. Images preserve their
+aspect ratio, and the layout stacks on narrow screens. Column names and report text
+are escaped before rendering custom HTML.
+
+To preview locally on macOS/Linux:
+
+```bash
+cd /Users/xiaoxue/Documents/GitHub/DataTrap
+.venv/bin/python -m streamlit run app.py --server.address 127.0.0.1 --server.port 8501
+```
+
+Open http://127.0.0.1:8501/. The default **Correlation plot twist** sample demonstrates
+the verified Surprised state; **Student scores** demonstrates detected quality issues.
+Ollama is required for AI actions, not for the statistical dashboard.
+
 ## Team roles (suggested)
 
 - **Analysis:** `analyzer.py` and tests.
